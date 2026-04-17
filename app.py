@@ -107,6 +107,34 @@ def obtener_historial():
         return None
 
 
+# Borrar historial
+def borrar_historial():
+
+    try:
+        conn = psycopg2.connect(
+            user=USER,
+            password=PASSWORD,
+            host=HOST,
+            port=PORT,
+            dbname=DBNAME
+        )
+
+        cursor = conn.cursor()
+
+        query = "DELETE FROM ml.tb_iris"
+
+        cursor.execute(query)
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        st.success("Historial borrado correctamente")
+
+    except Exception as e:
+        st.error(f"Error al borrar: {e}")
+
+
 # Titulo
 st.title("🌸 Predictor de Especies de Iris")
 
@@ -156,7 +184,7 @@ if model is not None:
         )
 
 
-    # Botón
+    # Botón predicción
     if st.button("Predecir Especie", use_container_width=True):
 
         features = np.array([[
@@ -181,7 +209,6 @@ if model is not None:
         st.success(f"Especie predicha: {predicted_species}")
         st.info(f"Confianza: {confianza:.2f}")
 
-        # Guardar en base de datos
         guardar_prediccion(
             sepal_length,
             sepal_width,
@@ -199,11 +226,33 @@ if model is not None:
 # Historial
 st.markdown("---")
 
-st.subheader("📜 Historial de Predicciones (Descendente)")
+st.subheader("📜 Historial de Predicciones")
 
 historial = obtener_historial()
 
 if historial is not None:
+
+    col1, col2 = st.columns([3,1])
+
+    with col1:
+
+        especies = ["Todas"] + list(historial["Especie"].unique())
+
+        filtro = st.selectbox(
+            "Filtrar por especie",
+            especies
+        )
+
+    with col2:
+
+        if st.button("🗑️ Borrar Historial"):
+            borrar_historial()
+            st.rerun()
+
+
+    # Aplicar filtro
+    if filtro != "Todas":
+        historial = historial[historial["Especie"] == filtro]
 
     st.dataframe(
         historial,
