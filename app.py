@@ -1,9 +1,10 @@
+
 import streamlit as st
 import joblib
 import pickle
 import numpy as np
 import psycopg2
-from datetime import datetime
+import pandas as pd 
 
 # --- Configuración de Base de Datos ---
 USER = "postgres.hzzukkgqmvgdbbmpuvgv"
@@ -21,12 +22,10 @@ def get_connection():
         dbname=DBNAME
     )
 
-# Función para guardar predicción
 def save_prediction(sepal_l, sepal_w, petal_l, petal_w, prediction, confidence):
     try:
         conn = get_connection()
         cur = conn.cursor()
-        # Asegúrate de que la tabla exista
         cur.execute("""
             CREATE TABLE IF NOT EXISTS iris_history (
                 id SERIAL PRIMARY KEY,
@@ -39,7 +38,6 @@ def save_prediction(sepal_l, sepal_w, petal_l, petal_w, prediction, confidence):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Insertar datos
         query = """
             INSERT INTO iris_history (sepal_length, sepal_width, petal_length, petal_width, prediction, confidence)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -49,9 +47,8 @@ def save_prediction(sepal_l, sepal_w, petal_l, petal_w, prediction, confidence):
         cur.close()
         conn.close()
     except Exception as e:
-        st.error(f"Error al guardar en DB: {e}")
+        st.error(f"Error al guardar: {e}")
 
-# Función para obtener historial
 def get_history():
     try:
         conn = get_connection()
@@ -62,7 +59,6 @@ def get_history():
         conn.close()
         return rows
     except Exception as e:
-        st.error(f"Error al obtener historial: {e}")
         return []
 
 # --- Configuración de la página ---
@@ -76,8 +72,8 @@ def load_models():
         with open('components/model_info.pkl', 'rb') as f:
             model_info = pickle.load(f)
         return model, scaler, model_info
-    except FileNotFoundError:
-        st.error("No se encontraron los archivos del modelo en 'components/'")
+    except Exception:
+        st.error("Archivos del modelo no encontrados.")
         return None, None, None
 
 st.title("🌸 Predictor de Especies de Iris")
@@ -85,16 +81,17 @@ st.title("🌸 Predictor de Especies de Iris")
 model, scaler, model_info = load_models()
 
 if model is not None:
-    col1, col2 = st.columns()
+    # CORRECCIÓN AQUÍ: Definimos explícitamente 2 columnas
+    col1, col2 = st.columns(2) 
 
     with col1:
         st.header("Entrada de Datos")
-        sepal_length = st.number_input("Longitud del Sépalo (cm)", 0.0, 10.0, 5.0)
-        sepal_width = st.number_input("Ancho del Sépalo (cm)", 0.0, 10.0, 3.0)
-        petal_length = st.number_input("Longitud del Pétalo (cm)", 0.0, 10.0, 4.0)
-        petal_width = st.number_input("Ancho del Pétalo (cm)", 0.0, 10.0, 1.0)
+        sepal_length = st.number_input("Longitud Sépalo", 0.0, 10.0, 5.0)
+        sepal_width = st.number_input("Ancho Sépalo", 0.0, 10.0, 3.0)
+        petal_length = st.number_input("Longitud Pétalo", 0.0, 10.0, 4.0)
+        petal_width = st.number_input("Ancho Pétalo", 0.0, 10.0, 1.0)
         
-        if st.button("Predecir Especie", use_container_width=True):
+        if st.button("Predecir", use_container_width=True):
             features = np.array([[sepal_length, sepal_width, petal_length, petal_width]])
             features_scaled = scaler.transform(features)
             
@@ -105,22 +102,16 @@ if model is not None:
             predicted_species = target_names[prediction_idx]
             confidence = float(max(probabilities))
             
-            # Guardar en Base de Datos
+            # Guardar en DB
             save_prediction(sepal_length, sepal_width, petal_length, petal_width, predicted_species, confidence)
             
-            st.success(f"**Resultado:** {predicted_species}")
-            st.info(f"**Confianza:** {confidence:.1%}")
+            st.success(f"**{predicted_species}** ({confidence:.1%})")
 
     with col2:
-        st.header("Historial de Predicciones")
-        history = get_history()
-        if history:
-            import pandas as pd
-            df = pd.DataFrame(history, columns=[
-                "Sépalo L", "Sépalo W", "Pétalo L", "Pétalo W", "Predicción", "Confianza", "Fecha"
-            ])
-            # Formatear la confianza como porcentaje para mostrar
-            df['Confianza'] = df['Confianza'].apply(lambda x: f"{x:.1%}")
+        st.header("Historial (Recientes primero)")
+        data = get_history()
+        if data:
+            df = pd.DataFrame(data, columns=["SepalL", "SepalW", "PetalL", "PetalW", "Especie", "Confianza", "Fecha"])
             st.dataframe(df, use_container_width=True)
         else:
-            st.write("Aún no hay registros en el historial.")
+            st.info("No hay registros aún.")
