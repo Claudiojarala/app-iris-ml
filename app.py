@@ -13,7 +13,7 @@ PORT = "6543"
 DBNAME = "postgres"
 
 def get_connection():
-    """Establece la conexión con la base de datos de Supabase."""
+    """Establece la conexión con la base de datos."""
     return psycopg2.connect(
         user=USER,
         password=PASSWORD,
@@ -23,11 +23,11 @@ def get_connection():
     )
 
 def save_prediction(sl, sw, pl, pw, species, confidence):
-    """Guarda los datos de entrada y la predicción en la base de datos."""
+    """Guarda los datos y el resultado en la tabla iris_history."""
     try:
         conn = get_connection()
         cur = conn.cursor()
-        # Crear la tabla si no existe con la estructura de tu historial
+        # Crear la tabla si no existe
         cur.execute("""
             CREATE TABLE IF NOT EXISTS iris_history (
                 id SERIAL PRIMARY KEY,
@@ -52,7 +52,7 @@ def save_prediction(sl, sw, pl, pw, species, confidence):
         st.error(f"Error al guardar en BD: {e}")
 
 def get_history():
-    """Consulta el historial ordenado por fecha de forma descendente."""
+    """Consulta el historial en orden descendente por fecha."""
     try:
         conn = get_connection()
         cur = conn.cursor()
@@ -69,15 +69,15 @@ st.set_page_config(page_title="Predictor de Iris", page_icon="🌸", layout="wid
 
 @st.cache_resource
 def load_models():
-    """Carga los modelos desde la carpeta 'components'."""
+    """Carga el modelo, escalador e información desde components/."""
     try:
         model = joblib.load('components/iris_model.pkl')
         scaler = joblib.load('components/iris_scaler.pkl')
         with open('components/model_info.pkl', 'rb') as f:
             model_info = pickle.load(f)
         return model, scaler, model_info
-    except FileNotFoundError:
-        st.error("No se encontraron los archivos en 'components/'")
+    except Exception as e:
+        st.error(f"Error al cargar archivos: {e}")
         return None, None, None
 
 st.title("🌸 Predictor de Especies de Iris")
@@ -85,7 +85,7 @@ st.title("🌸 Predictor de Especies de Iris")
 model, scaler, model_info = load_models()
 
 if model is not None:
-    # Usamos columnas para que se parezca a tu diseño
+    # Organización en columnas: formulario a la izquierda, historial a la derecha
     col_input, col_hist = st.columns([1, 1.5])
 
     with col_input:
@@ -96,30 +96,31 @@ if model is not None:
         pw = st.number_input("PW (cm)", 0.0, 10.0, 1.0)
         
         if st.button("Predecir Especie"):
-            # Preparar datos
+            # 1. Preparar y escalar datos
             features = np.array([[sl, sw, pl, pw]])
             features_scaled = scaler.transform(features)
             
-            # CORRECCIÓN DEL ERROR: Accedemos al primer elemento antes de int()
+            # 2. PREDICCIÓN (Aquí está el arreglo: se añade)
             prediction_idx = int(model.predict(features_scaled))
             probabilities = model.predict_proba(features_scaled)
             
+            # 3. Obtener etiquetas
             target_names = model_info['target_names']
             predicted_species = target_names[prediction_idx]
             confidence = float(max(probabilities))
             
-            # Guardar en base de datos
+            # 4. Guardar en base de datos
             save_prediction(sl, sw, pl, pw, predicted_species, confidence)
             
-            st.success(f"Especie predicha: **{predicted_species}**")
+            st.success(f"Especie: **{predicted_species}**")
             st.write(f"Confianza: **{confidence:.2f}**")
 
     with col_hist:
         st.header("📜 Historial de Predicciones (Descendente)")
         history_data = get_history()
         if history_data:
-            # Crear DataFrame con los nombres exactos de tu imagen
+            # Crear la tabla usando Pandas
             df = pd.DataFrame(history_data, columns=["SL", "SW", "PL", "PW", "Especie", "Confianza", "Fecha"])
             st.dataframe(df, use_container_width=True)
         else:
-            st.info("No hay registros previos.")
+            st.info("No hay registros disponibles.")
