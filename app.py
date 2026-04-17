@@ -1,10 +1,9 @@
-
 import streamlit as st
 import joblib
 import pickle
 import numpy as np
 import psycopg2
-import pandas as pd 
+import pandas as pd
 
 # --- Configuración de Base de Datos ---
 USER = "postgres.hzzukkgqmvgdbbmpuvgv"
@@ -47,7 +46,7 @@ def save_prediction(sepal_l, sepal_w, petal_l, petal_w, prediction, confidence):
         cur.close()
         conn.close()
     except Exception as e:
-        st.error(f"Error al guardar: {e}")
+        st.error(f"Error al guardar en BD: {e}")
 
 def get_history():
     try:
@@ -58,7 +57,7 @@ def get_history():
         cur.close()
         conn.close()
         return rows
-    except Exception as e:
+    except Exception:
         return []
 
 # --- Configuración de la página ---
@@ -72,8 +71,8 @@ def load_models():
         with open('components/model_info.pkl', 'rb') as f:
             model_info = pickle.load(f)
         return model, scaler, model_info
-    except Exception:
-        st.error("Archivos del modelo no encontrados.")
+    except Exception as e:
+        st.error(f"Error al cargar archivos: {e}")
         return None, None, None
 
 st.title("🌸 Predictor de Especies de Iris")
@@ -81,8 +80,7 @@ st.title("🌸 Predictor de Especies de Iris")
 model, scaler, model_info = load_models()
 
 if model is not None:
-    # CORRECCIÓN AQUÍ: Definimos explícitamente 2 columnas
-    col1, col2 = st.columns(2) 
+    col1, col2 = st.columns(2)
 
     with col1:
         st.header("Entrada de Datos")
@@ -92,26 +90,36 @@ if model is not None:
         petal_width = st.number_input("Ancho Pétalo", 0.0, 10.0, 1.0)
         
         if st.button("Predecir", use_container_width=True):
+            # Preparar y escalar
             features = np.array([[sepal_length, sepal_width, petal_length, petal_width]])
             features_scaled = scaler.transform(features)
             
-            prediction_idx = model.predict(features_scaled)
+            # Predicción
+            prediction_idx = int(model.predict(features_scaled))
             probabilities = model.predict_proba(features_scaled)
-            
-            target_names = model_info['target_names']
-            predicted_species = target_names[prediction_idx]
             confidence = float(max(probabilities))
             
-            # Guardar en DB
-            save_prediction(sepal_length, sepal_width, petal_length, petal_width, predicted_species, confidence)
+            # --- SOLUCIÓN AL TYPEERROR ---
+            target_names = model_info.get('target_names', ["Desconocido"])
             
-            st.success(f"**{predicted_species}** ({confidence:.1%})")
+            # Validamos que el índice exista en la lista
+            if prediction_idx < len(target_names):
+                predicted_species = target_names[prediction_idx]
+            else:
+                predicted_species = f"Clase {prediction_idx}"
+            
+            # Guardar y Mostrar
+            save_prediction(sepal_length, sepal_width, petal_length, petal_width, predicted_species, confidence)
+            st.success(f"**Resultado:** {predicted_species}")
+            st.info(f"**Confianza:** {confidence:.1%}")
 
     with col2:
-        st.header("Historial (Recientes primero)")
+        st.header("Historial (Base de Datos)")
         data = get_history()
         if data:
             df = pd.DataFrame(data, columns=["SepalL", "SepalW", "PetalL", "PetalW", "Especie", "Confianza", "Fecha"])
+            # Formatear fecha para que sea más legible
+            df['Fecha'] = pd.to_datetime(df['Fecha']).dt.strftime('%Y-%m-%d %H:%M')
             st.dataframe(df, use_container_width=True)
         else:
-            st.info("No hay registros aún.")
+            st.info("No hay registros en el historial.")
