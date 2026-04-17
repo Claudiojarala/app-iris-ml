@@ -2,125 +2,94 @@ import streamlit as st
 import joblib
 import pickle
 import numpy as np
+
 import psycopg2
-import pandas as pd
-
-# --- Configuración de Base de Datos ---
+# Fetch variables
 USER = "postgres.hzzukkgqmvgdbbmpuvgv"
-PASSWORD = "Facundo12*12"
-HOST = "aws-1-us-east-2.pooler.supabase.com"
-PORT = "6543"
-DBNAME = "postgres"
+PASSWORD = "Facundo12*12"# os.getenv("password")
+HOST = "aws-1-us-east-2.pooler.supabase.com" #os.getenv("host")
+PORT = "6543" #os.getenv("port")
+DBNAME = "postgres" #os.getenv("dbname")
 
-def get_connection():
-    """Establece la conexión con la base de datos."""
-    return psycopg2.connect(
+# Configuración de la página
+st.set_page_config(page_title="Predictor de Iris", page_icon="🌸")
+# Connect to the database
+try:
+    connection = psycopg2.connect(
         user=USER,
         password=PASSWORD,
         host=HOST,
         port=PORT,
         dbname=DBNAME
     )
+    print("Connection successful!")
+    
+    # Create a cursor to execute SQL queries
+    cursor = connection.cursor()
+    
+    # Example query
+    cursor.execute("SELECT NOW();")
+    result = cursor.fetchone()
+    print("Current Time:", result)
+    # Close the cursor and connection
+    cursor.close()
+    connection.close()
+    print("Connection closed.")
 
-def save_prediction(sl, sw, pl, pw, species, confidence):
-    """Guarda los datos y el resultado en la tabla iris_history."""
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        # Crear la tabla si no existe
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS iris_history (
-                id SERIAL PRIMARY KEY,
-                sl FLOAT,
-                sw FLOAT,
-                pl FLOAT,
-                pw FLOAT,
-                especie TEXT,
-                confianza FLOAT,
-                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # Insertar los valores
-        cur.execute("""
-            INSERT INTO iris_history (sl, sw, pl, pw, especie, confianza)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (sl, sw, pl, pw, species, confidence))
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        st.error(f"Error al guardar en BD: {e}")
+except Exception as e:
+    st.write(str(e))
 
-def get_history():
-    """Consulta el historial en orden descendente por fecha."""
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT sl, sw, pl, pw, especie, confianza, fecha FROM iris_history ORDER BY fecha DESC")
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-        return rows
-    except Exception:
-        return []
 
-# --- Configuración de la Página ---
-st.set_page_config(page_title="Predictor de Iris", page_icon="🌸", layout="wide")
 
+# Función para cargar los modelos
 @st.cache_resource
 def load_models():
-    """Carga el modelo, escalador e información desde components/."""
     try:
         model = joblib.load('components/iris_model.pkl')
         scaler = joblib.load('components/iris_scaler.pkl')
         with open('components/model_info.pkl', 'rb') as f:
             model_info = pickle.load(f)
         return model, scaler, model_info
-    except Exception as e:
-        st.error(f"Error al cargar archivos: {e}")
+    except FileNotFoundError:
+        st.error("No se encontraron los archivos del modelo en la carpeta 'models/'")
         return None, None, None
 
+# Título
 st.title("🌸 Predictor de Especies de Iris")
 
+# Cargar modelos
 model, scaler, model_info = load_models()
 
 if model is not None:
-    # Organización en columnas: formulario a la izquierda, historial a la derecha
-    col_input, col_hist = st.columns([1, 1.5])
-
-    with col_input:
-        st.header("Entrada de Datos")
-        sl = st.number_input("SL (cm)", 0.0, 10.0, 5.0)
-        sw = st.number_input("SW (cm)", 0.0, 10.0, 3.0)
-        pl = st.number_input("PL (cm)", 0.0, 10.0, 4.0)
-        pw = st.number_input("PW (cm)", 0.0, 10.0, 1.0)
+    # Inputs
+    st.header("Ingresa las características de la flor:")
+    st.write(result)
+    
+    sepal_length = st.number_input("Longitud del Sépalo (cm)", min_value=0.0, max_value=10.0, value=5.0, step=0.1)
+    sepal_width = st.number_input("Ancho del Sépalo (cm)", min_value=0.0, max_value=10.0, value=3.0, step=0.1)
+    petal_length = st.number_input("Longitud del Pétalo (cm)", min_value=0.0, max_value=10.0, value=4.0, step=0.1)
+    petal_width = st.number_input("Ancho del Pétalo (cm)", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
+    
+    # Botón de predicción
+    if st.button("Predecir Especie"):
+        # Preparar datos
+        features = np.array([[sepal_length, sepal_width, petal_length, petal_width]])
         
-        if st.button("Predecir Especie"):
-            # 1. Preparar y escalar datos
-            features = np.array([[sl, sw, pl, pw]])
-            features_scaled = scaler.transform(features)
-            
-            # 2. PREDICCIÓN (Aquí está el arreglo: se añade)
-            prediction_idx = int(model.predict(features_scaled))
-            probabilities = model.predict_proba(features_scaled)
-            
-            # 3. Obtener etiquetas
-            target_names = model_info['target_names']
-            predicted_species = target_names[prediction_idx]
-            confidence = float(max(probabilities))
-            
-            # 4. Guardar en base de datos
-            save_prediction(sl, sw, pl, pw, predicted_species, confidence)
-            
-            st.success(f"Especie: **{predicted_species}**")
-            st.write(f"Confianza: **{confidence:.2f}**")
-
-    with col_hist:
-        st.header("📜 Historial de Predicciones (Descendente)")
-        history_data = get_history()
-        if history_data:
-            # Crear la tabla usando Pandas
-            df = pd.DataFrame(history_data, columns=["SL", "SW", "PL", "PW", "Especie", "Confianza", "Fecha"])
-            st.dataframe(df, use_container_width=True)
-        else:
-            st.info("No hay registros disponibles.")
+        # Estandarizar
+        features_scaled = scaler.transform(features)
+        
+        # Predecir
+        prediction = model.predict(features_scaled)[0]
+        probabilities = model.predict_proba(features_scaled)[0]
+        
+        # Mostrar resultado
+        target_names = model_info['target_names']
+        predicted_species = target_names[prediction]
+        
+        st.success(f"Especie predicha: **{predicted_species}**")
+        st.write(f"Confianza: **{max(probabilities):.1%}**")
+        
+        # Mostrar todas las probabilidades
+        st.write("Probabilidades:")
+        for species, prob in zip(target_names, probabilities):
+            st.write(f"- {species}: {prob:.1%}")
